@@ -4,20 +4,21 @@ import textwrap
 from datetime import datetime
 
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
+    Update, InlineKeyboardButton, InlineKeyboardMarkup,
+    ReplyKeyboardMarkup, KeyboardButton, BotCommand
 )
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, ConversationHandler, CallbackContext,
-    filters, CallbackQueryHandler
+    Application, CommandHandler, MessageHandler, ConversationHandler,
+    CallbackContext, CallbackQueryHandler, filters
 )
 
-# === YOUR BOT TOKEN ===
-TOKEN = "8444222504:AAHrS8Zs_xTQpQYq80okIboHF6tnw_FfzDc"
+# ============ BOT TOKEN ============
+TOKEN = os.getenv("BOT_TOKEN", "8444222504:AAHrS8Zs_xTQpQYq80okIboHF6tnw_FfzDc")
 
-# States for ConversationHandler
+# Conversation states
 ENTER_TEXT, CHOOSE_TYPE = range(2)
 
-# Supported types map (accepts user text like 'txt' or '.txt')
+# Supported types
 SUPPORTED = {
     "txt": "txt",
     "py": "py",
@@ -30,10 +31,11 @@ SUPPORTED = {
     "yaml": "yaml",
     "yml": "yaml",
     "pdf": "pdf",
-    "xls": "xlsx",   # map xls to xlsx file creation
+    "xls": "xlsx",
     "xlsx": "xlsx",
     "md": "md"
 }
+
 
 # ---------- Helpers ----------
 def _normalize_ext(ext: str) -> str:
@@ -52,13 +54,11 @@ def make_plain_file(text: str, ext: str) -> io.BytesIO:
     return bio
 
 def make_pdf(text: str) -> io.BytesIO:
-    # lightweight PDF using fpdf
     from fpdf import FPDF
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-    # wrap to fit page
     for line in text.splitlines() or [" "]:
         for wrapped in textwrap.wrap(line, width=90) or [" "]:
             pdf.cell(0, 8, txt=wrapped, ln=True)
@@ -68,7 +68,6 @@ def make_pdf(text: str) -> io.BytesIO:
     return out
 
 def make_xlsx(text: str) -> io.BytesIO:
-    # put the whole text in A1; also split lines into rows for convenience
     from openpyxl import Workbook
     wb = Workbook()
     ws = wb.active
@@ -83,10 +82,8 @@ def make_xlsx(text: str) -> io.BytesIO:
     return out
 
 def build_type_keyboard() -> InlineKeyboardMarkup:
-    # Show a compact grid of file options
     order = ["txt", "py", "css", "js", "html", "json", "csv", "xml", "yaml", "md", "pdf", "xlsx"]
-    buttons = []
-    row = []
+    buttons, row = [], []
     for ext in order:
         row.append(InlineKeyboardButton(ext, callback_data=f"ext:{ext}"))
         if len(row) == 4:
@@ -97,6 +94,8 @@ def build_type_keyboard() -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton("⬅️ Start over", callback_data="startover")])
     return InlineKeyboardMarkup(buttons)
 
+
+# ---------- Handlers ----------
 async def set_commands(app: Application):
     await app.bot.set_my_commands([
         BotCommand("start", "Open bot menu / welcome"),
@@ -104,9 +103,7 @@ async def set_commands(app: Application):
         BotCommand("help", "How to use")
     ])
 
-# ---------- Handlers ----------
-async def start(update: Update, context: CallbackContext) -> int:
-    # Show a small reply keyboard like the screenshot vibe
+async def start(update: Update, context: CallbackContext):
     reply_kb = ReplyKeyboardMarkup(
         [[KeyboardButton("▶️ Start text to File Generate (/generate)")],
          [KeyboardButton("ℹ️ More menu"), KeyboardButton("❓ Help (/help)")]],
@@ -115,11 +112,11 @@ async def start(update: Update, context: CallbackContext) -> int:
     msg = (
         "👋 **Welcome to Text ➜ Any File Bot!**\n\n"
         "এখানে যেকোনো টেক্সট থেকে এক ক্লিকে ফাইল বানাতে পারবে — txt, py, css, js, html, pdf, xls(xlsx), ইত্যাদি।\n\n"
-        "কীভাবে ব্যবহার করবে:\n"
+        "🔹 ব্যবহারবিধি:\n"
         "1) `/generate` প্রেস করো বা নিচের বাটন চাপো\n"
         "2) তোমার টেক্সট পাঠাও\n"
         "3) ফাইল টাইপ সিলেক্ট করো ✅\n\n"
-        "Ready? শুরু করি! 🚀"
+        "Ready? 🚀"
     )
     await update.effective_message.reply_text(msg, reply_markup=reply_kb, parse_mode="Markdown")
     return ConversationHandler.END
@@ -127,14 +124,13 @@ async def start(update: Update, context: CallbackContext) -> int:
 async def help_cmd(update: Update, context: CallbackContext):
     text = (
         "🛠 **Help**\n"
-        "- `/generate` → টেক্সট পাঠাও, তারপর যেকোনো টাইপ বাছাই করো।\n"
+        "- `/generate` → টেক্সট পাঠাও, তারপর ফাইল টাইপ বাছাই করো।\n"
         "- সাপোর্টেড: txt, py, css, js, html, json, csv, xml, yaml, md, pdf, xls/xlsx\n"
-        "- অন্য মেসেজ দিলে বট বলবে: “Please /generate click.. Tmi boilo valo moto..” 😄"
+        "- অন্য মেসেজ দিলে: “Please /generate click.. Tmi boilo valo moto..”"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
 async def more_menu(update: Update, context: CallbackContext):
-    # simple alias for help
     await help_cmd(update, context)
 
 async def generate(update: Update, context: CallbackContext) -> int:
@@ -162,10 +158,9 @@ async def choose_type_button(update: Update, context: CallbackContext) -> int:
         await query.edit_message_text("Invalid choice. Try again:", reply_markup=build_type_keyboard())
         return CHOOSE_TYPE
 
-    ext = data.split(":", 1)[1]  # normalized already
+    ext = data.split(":", 1)[1]
     text = context.user_data.get("text_to_convert", "")
 
-    # Create file
     if ext in {"txt", "py", "css", "js", "html", "json", "csv", "xml", "yaml", "md"}:
         fileobj = make_plain_file(text, ext)
     elif ext == "pdf":
@@ -181,36 +176,31 @@ async def choose_type_button(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 async def choose_type_text(update: Update, context: CallbackContext) -> int:
-    # accept typed extensions during CHOOSE_TYPE
     ext = _normalize_ext(update.message.text)
     if not ext:
         await update.message.reply_text("❌ Unsupported type. Try again ↓", reply_markup=build_type_keyboard())
         return CHOOSE_TYPE
-    # Simulate button flow
-    fake_update = Update(update.update_id, callback_query=None)
-    context.user_data.setdefault("text_to_convert", "")
+
+    text = context.user_data.get("text_to_convert", "")
     if ext == "xlsx":
-        fileobj = make_xlsx(context.user_data["text_to_convert"])
+        fileobj = make_xlsx(text)
     elif ext == "pdf":
-        fileobj = make_pdf(context.user_data["text_to_convert"])
+        fileobj = make_pdf(text)
     else:
-        fileobj = make_plain_file(context.user_data["text_to_convert"], ext)
+        fileobj = make_plain_file(text, ext)
+
     await update.message.reply_document(document=fileobj, caption=f"Here is your `{ext}` file ✅", parse_mode="Markdown")
     return ConversationHandler.END
 
 async def fallback_msg(update: Update, context: CallbackContext):
-    # Any other message outside conversations
     await update.message.reply_text("Please /generate click.. Tmi boilo valo moto.. 🙂")
 
-async def error_handler(update: object, context: CallbackContext) -> None:
-    try:
-        raise context.error
-    except Exception as e:
-        if update and hasattr(update, "message") and update.message:
-            await update.message.reply_text("⚠️ Unexpected error occurred. Try again.")
-        print(f"ERROR: {e}")
+async def error_handler(update: object, context: CallbackContext):
+    print(f"ERROR: {context.error}")
 
-def main():
+
+# ---------- Main ----------
+async def main():
     app = Application.builder().token(TOKEN).build()
 
     # Commands
@@ -218,7 +208,6 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.Regex("^(ℹ️ More menu)$"), more_menu))
 
-    # Generate flow
     conv = ConversationHandler(
         entry_points=[CommandHandler("generate", generate),
                       MessageHandler(filters.Regex("^▶️ Start text to File Generate"), generate)],
@@ -235,17 +224,15 @@ def main():
     )
     app.add_handler(conv)
 
-    # Fallback for any other text
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, fallback_msg))
-
-    # Errors
     app.add_error_handler(error_handler)
 
-    # Set commands so they appear in the Telegram menu (like your screenshot)
-    app.post_init = set_commands
+    await set_commands(app)
 
-    print("Bot is running…")
-    app.run_polling(close_loop=False)
+    print("🚀 Bot is running...")
+    await app.run_polling(close_loop=False)
+
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
